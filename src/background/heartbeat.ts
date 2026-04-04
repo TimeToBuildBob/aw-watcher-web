@@ -3,7 +3,12 @@ import { getActiveWindowTab, getTab, getTabs } from './helpers'
 import config from '../config'
 import { AWClient, IEvent } from 'aw-client'
 import { getBucketId, sendHeartbeat } from './client'
-import { getEnabled, getHeartbeatData, setHeartbeatData } from '../storage'
+import {
+  getEnabled,
+  getHeartbeatData,
+  setHeartbeatData,
+  getGmailEnabled,
+} from '../storage'
 import deepEqual from 'deep-equal'
 import * as punycode from 'punycode.js'
 
@@ -51,6 +56,71 @@ type HeartbeatTab = Pick<
   'url' | 'title' | 'audible' | 'incognito'
 >
 
+async function performHeartbeat(
+  client: AWClient,
+  data: IEvent['data'],
+  now: Date,
+  options: { finalizeOnly?: boolean } = {},
+) {
+  const previousData = await getHeartbeatData()
+  if (previousData && !deepEqual(previousData, data)) {
+    console.debug(
+      `Sending heartbeat for previous data: ${formatHeartbeatLogData(previousData)}`,
+    )
+    await sendHeartbeat(
+      client,
+      await getBucketId(),
+      new Date(now.getTime() - 1),
+      previousData,
+      config.heartbeat.intervalInSeconds + 20,
+    )
+  }
+
+  if (options.finalizeOnly) {
+    if (previousData) {
+      await browser.storage.local.remove('heartbeatData')
+    }
+    return
+  }
+
+  console.debug(`Sending heartbeat: ${formatHeartbeatLogData(data)}`)
+  await sendHeartbeat(
+    client,
+    await getBucketId(),
+    now,
+    data,
+    config.heartbeat.intervalInSeconds + 20,
+  )
+  await setHeartbeatData(data)
+}
+
+export function setupMessageListener(client: AWClient) {
+  browser.runtime.onMessage.addListener(
+    async (message: any, sender: browser.Runtime.MessageSender) => {
+      const enabled = await getEnabled()
+      const gmailEnabled = await getGmailEnabled()
+      if (!enabled || !gmailEnabled) return
+
+      if (message.type === 'AW_GMAIL_HEARTBEAT') {
+        const tab = sender.tab
+        if (!tab || !tab.url || !tab.title) return
+        if (!tab.url.includes('mail.google.com')) return
+        const tabs = await getTabs()
+
+        const data: IEvent['data'] = {
+          url: decodeURL(tab.url),
+          title: tab.title,
+          audible: tab.audible ?? false,
+          incognito: tab.incognito,
+          tabCount: tabs.length,
+          ...message.data,
+        }
+        await queueHeartbeat(() => performHeartbeat(client, data, new Date()))
+      }
+    },
+  )
+}
+
 async function heartbeat(
   client: AWClient,
   tab: HeartbeatTab | undefined,
@@ -85,28 +155,16 @@ async function heartbeat(
     incognito,
     tabCount: tabCount,
   }
-  const previousData = await getHeartbeatData()
-  if (previousData && !deepEqual(previousData, data)) {
-    console.debug(
-      `Sending heartbeat for previous data: ${formatHeartbeatLogData(previousData)}`,
-    )
-    await sendHeartbeat(
-      client,
-      await getBucketId(),
-      new Date(now.getTime() - 1),
-      previousData,
-      config.heartbeat.intervalInSeconds + 20,
-    )
+
+  const gmailEnabled = await getGmailEnabled()
+  if (gmailEnabled && tab.url.includes('mail.google.com')) {
+    // Sharp cut: finalize the previous activity (e.g. if we came from Google Search)
+    // but don't start the 'Generic' Gmail event. Gmail.ts will do that with metadata.
+    await performHeartbeat(client, data, now, { finalizeOnly: true })
+    return
   }
-  console.debug(`Sending heartbeat: ${formatHeartbeatLogData(data)}`)
-  await sendHeartbeat(
-    client,
-    await getBucketId(),
-    now,
-    data,
-    config.heartbeat.intervalInSeconds + 20,
-  )
-  await setHeartbeatData(data)
+
+  await performHeartbeat(client, data, now)
 }
 
 // Chrome can report URL and title changes before a preceding asynchronous
