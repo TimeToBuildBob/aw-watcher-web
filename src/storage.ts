@@ -109,3 +109,11 @@ export const getApiKey = (): Promise<ApiKey | undefined> =>
     .then((data: StorageData) => data.apiKey as string | undefined)
 export const setApiKey = (apiKey: ApiKey) =>
   browser.storage.local.set({ apiKey })
+
+type PauseWhenUnfocused = boolean
+export const getPauseWhenUnfocused = (): Promise<PauseWhenUnfocused> =>
+  browser.storage.local
+    .get('pauseWhenUnfocused')
+    .then((_) => Boolean(_.pauseWhenUnfocused))
+export const setPauseWhenUnfocused = (pauseWhenUnfocused: PauseWhenUnfocused) =>
+  browser.storage.local.set({ pauseWhenUnfocused })

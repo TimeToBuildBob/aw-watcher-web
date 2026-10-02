@@ -6,6 +6,8 @@ import {
   getHostname,
   setHostname,
   setApiKey,
+  getPauseWhenUnfocused,
+  setPauseWhenUnfocused,
 } from '../storage'
 import { detectBrowser } from '../background/helpers'
 
@@ -42,6 +44,11 @@ async function saveOptions(e: SubmitEvent): Promise<void> {
   const apiKeyInput = document.querySelector<HTMLInputElement>('#apiKey')
   const apiKey = apiKeyInput?.value?.trim() ?? ''
 
+  const pauseWhenUnfocusedInput = document.querySelector<HTMLInputElement>(
+    '#pauseWhenUnfocused',
+  )
+  const pauseWhenUnfocused = pauseWhenUnfocusedInput?.checked ?? false
+
   const form = e.target as HTMLFormElement
   const button = form.querySelector<HTMLButtonElement>('button')
   if (!button) return
@@ -57,6 +64,7 @@ async function saveOptions(e: SubmitEvent): Promise<void> {
     } else {
       await browser.storage.local.remove('apiKey')
     }
+    await setPauseWhenUnfocused(pauseWhenUnfocused)
     await reloadExtension()
     button.textContent = 'Save'
     button.classList.add('accept')
@@ -111,6 +119,14 @@ async function restoreOptions(): Promise<void> {
     const apiKeyInput = document.querySelector<HTMLInputElement>('#apiKey')
     if (apiKeyInput && apiKey !== undefined) {
       apiKeyInput.value = apiKey
+    }
+
+    const pauseWhenUnfocused = await getPauseWhenUnfocused()
+    const pauseWhenUnfocusedInput = document.querySelector<HTMLInputElement>(
+      '#pauseWhenUnfocused',
+    )
+    if (pauseWhenUnfocusedInput) {
+      pauseWhenUnfocusedInput.checked = pauseWhenUnfocused
     }
   } catch (error) {
     console.error('Failed to restore options:', error)
